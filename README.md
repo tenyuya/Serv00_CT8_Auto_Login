@@ -23,7 +23,7 @@
         - 
           ```json
           [
-            {"username": "serv00的账号", "password": "serv00的密码", "panel": "panel6.serv00.com"},
+            {"username": "serv00的账号", "password": "serv00的密码", "panel": "panel11.serv00.com"},
             {"username": "ct8的账号", "password": "ct8的密码", "panel": "panel.ct8.pl"}
           ]
           ```
@@ -58,7 +58,7 @@
     - 示例值:
       ```json
       [
-            {"username": "serv00的账号", "password": "serv00的密码", "panel": "panel6.serv00.com"},
+            {"username": "serv00的账号", "password": "serv00的密码", "panel": "panel11.serv00.com"},
             {"username": "ct8的账号", "password": "ct8的密码", "panel": "panel.ct8.pl"}
       ]
       ```
