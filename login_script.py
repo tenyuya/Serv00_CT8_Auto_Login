@@ -65,7 +65,7 @@ async def login(username, password, panel):
     finally:
         if page:
             await page.close()
-# 显式的浏览器关闭函数
+
 async def shutdown_browser():
     global browser
     if browser:
@@ -83,6 +83,10 @@ async def main():
         print(f'读取 accounts.json 文件时出错: {e}')
         return
 
+    # 添加报告头部
+    message += "📊 *登录状态报告*\n\n"
+    message += "━━━━━━━━━━━━━━━━━━━━\n"
+
     for account in accounts:
         username = account['username']
         password = account['password']
@@ -92,52 +96,43 @@ async def main():
         is_logged_in = await login(username, password, panel)
 
         now_beijing = format_to_iso(datetime.utcnow() + timedelta(hours=8))
-        if is_logged_in:
-            message += f"✅*{serviceName}*账号 *{username}* 于北京时间 {now_beijing}登录面板成功！\n\n"
-            print(f"{serviceName}账号 {username} 于北京时间 {now_beijing}登录面板成功！")
-        else:
-            message += f"❌*{serviceName}*账号 *{username}* 于北京时间 {now_beijing}登录失败\n\n❗请检查*{username}*账号和密码是否正确。\n\n"
-            print(f"{serviceName}账号 {username} 登录失败，请检查{serviceName}账号和密码是否正确。")
+        status_icon = "✅" if is_logged_in else "❌"
+        status_text = "登录成功" if is_logged_in else "登录失败"
+        color = "#27ae60" if is_logged_in else "#e74c3c"
+        
+        message += (
+            f"🔹 *服务商*: `{serviceName.upper()}`\n"
+            f"👤 *账号*: `{username}`\n"
+            f"🕒 *时间*: {now_beijing}\n"
+            f"{status_icon} *状态*: _{status_text}_\n"
+            "────────────────────\n"
+        )
 
         delay = random.randint(1000, 8000)
         await delay_time(delay)
-        
-    message += f"🔚脚本结束，如有异常点击下方按钮👇"
+    
+    # 添加报告尾部
+    message += "\n🏁 *所有账号操作已完成*"
     await send_telegram_message(message)
-    print(f'所有{serviceName}账号登录完成！')
-    # 退出时关闭浏览器
+    print('所有账号登录完成！')
     await shutdown_browser()
 
 async def send_telegram_message(message):
-    # 使用 Markdown 格式
     formatted_message = f"""
-*🎯 serv00&ct8自动化保号脚本运行报告*
-
-🕰 *北京时间*: {format_to_iso(datetime.utcnow() + timedelta(hours=8))}
-
-⏰ *UTC时间*: {format_to_iso(datetime.utcnow())}
-
-📝 *任务报告*:
+📨 *Serv00 & CT8 保号脚本运行报告*
+━━━━━━━━━━━━━━━━━━━━
+🕘 北京时间: `{format_to_iso(datetime.utcnow() + timedelta(hours=8))}`
+🌐 UTC时间: `{format_to_iso(datetime.utcnow())}`
+━━━━━━━━━━━━━━━━━━━━
 
 {message}
-
-    """
+"""
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         'chat_id': TELEGRAM_CHAT_ID,
         'text': formatted_message,
-        'parse_mode': 'Markdown',  # 使用 Markdown 格式
-        'reply_markup': {
-            'inline_keyboard': [
-                [
-                    {
-                        'text': '问题反馈❓',
-                        'url': 'https://t.me/yxjsjl'  # 点击按钮后跳转到问题反馈的链接
-                    }
-                ]
-            ]
-        }
+        'parse_mode': 'Markdown',
     }
     headers = {
         'Content-Type': 'application/json'
