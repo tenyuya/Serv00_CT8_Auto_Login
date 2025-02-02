@@ -118,7 +118,7 @@ async def main():
 
 async def send_telegram_message(message):
     formatted_message = f"""
-📨 *Serv00 & CT8 保号脚本运行报告*  # 修改标题大小写
+📨 *Serv00 & CT8 保号脚本运行报告*
 ━━━━━━━━━━━━━━━━━━━━
 🕘 北京时间: `{format_to_iso(datetime.utcnow() + timedelta(hours=8))}`
 🌐 UTC时间: `{format_to_iso(datetime.utcnow())}`
