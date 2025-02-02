@@ -1,4 +1,3 @@
-```markdown
 <div align="center">
   <h1>🎯 Serv00 & CT8 自动化保号脚本</h1>
   
