@@ -27,7 +27,7 @@ async def login(username, password, panel):
     global browser
 
     page = None  # 确保 page 在任何情况下都被定义
-    serviceName = 'ct8' if 'ct8' in panel else 'serv00'
+    serviceName = 'CT8' if 'ct8' in panel else 'Serv00'  # 修改大小写
     try:
         if not browser:
             browser = await launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
@@ -92,16 +92,15 @@ async def main():
         password = account['password']
         panel = account['panel']
 
-        serviceName = 'ct8' if 'ct8' in panel else 'serv00'
+        serviceName = 'CT8' if 'ct8' in panel else 'Serv00'  # 修改大小写
         is_logged_in = await login(username, password, panel)
 
         now_beijing = format_to_iso(datetime.utcnow() + timedelta(hours=8))
         status_icon = "✅" if is_logged_in else "❌"
         status_text = "登录成功" if is_logged_in else "登录失败"
-        color = "#27ae60" if is_logged_in else "#e74c3c"
         
         message += (
-            f"🔹 *服务商*: `{serviceName.upper()}`\n"
+            f"🔹 *服务商*: `{serviceName}`\n"  # 保持变量引用
             f"👤 *账号*: `{username}`\n"
             f"🕒 *时间*: {now_beijing}\n"
             f"{status_icon} *状态*: _{status_text}_\n"
@@ -119,7 +118,7 @@ async def main():
 
 async def send_telegram_message(message):
     formatted_message = f"""
-📨 *Serv00 & CT8 保号脚本运行报告*
+📨 *Serv00 & CT8 保号脚本运行报告*  # 修改标题大小写
 ━━━━━━━━━━━━━━━━━━━━
 🕘 北京时间: `{format_to_iso(datetime.utcnow() + timedelta(hours=8))}`
 🌐 UTC时间: `{format_to_iso(datetime.utcnow())}`
