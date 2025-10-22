@@ -63,7 +63,7 @@ async def login(username, password, panel):
 
         # 根据图片中的结构，用户名输入框的选择器是 input[name="username"]
         print("正在定位用户名输入框...")
-        username_input = await page.waitForSelector('input[name="username"]', {'timeout': 5000})
+        username_input = await page.waitForSelector('input[name="username"]', {'timeout': 10000})
         if username_input:
             print("找到用户名输入框，开始输入...")
             # 先滚动到元素可见
@@ -89,7 +89,7 @@ async def login(username, password, panel):
 
         # 密码输入框 - 根据图片中的结构
         print("正在定位密码输入框...")
-        password_input = await page.waitForSelector('input[name="password"]', {'timeout': 5000})
+        password_input = await page.waitForSelector('input[name="password"]', {'timeout': 10000})
         if password_input:
             print("找到密码输入框，开始输入...")
             await password_input.click()
@@ -99,11 +99,12 @@ async def login(username, password, panel):
         else:
             raise Exception('无法找到密码输入框')
 
-        # 根据图片中的结构，登录按钮是 button.button.button--primary[type="submit"]
+        # 根据图片中的结构，登录按钮是 button.button.button--primary
         print("正在定位登录按钮...")
-        login_button = await page.waitForSelector('button.button.button--primary[type="submit"]', {
-            'visible': True,
-            'timeout': 5000
+        
+        # 使用正确的选择器 - 修正了选择器语法
+        login_button = await page.waitForSelector('button.button.button--primary', {
+            'timeout': 10000
         })
         
         if login_button:
@@ -117,15 +118,22 @@ async def login(username, password, panel):
             await asyncio.sleep(1)
             
             # 确保按钮可点击
-            await page.waitForFunction('''() => {
-                const btn = document.querySelector('button.button.button--primary[type="submit"]');
+            is_enabled = await page.evaluate('''() => {
+                const btn = document.querySelector('button.button.button--primary');
                 return btn && !btn.disabled;
-            }''', {'timeout': 5000})
+            }''')
             
-            # 点击登录按钮
-            await login_button.click()
-            print("登录按钮已点击，等待响应...")
-            
+            if not is_enabled:
+                print("按钮不可点击，尝试其他方法...")
+                # 如果按钮不可点击，尝试通过表单提交
+                await page.evaluate('''() => {
+                    document.querySelector('form[action="/login/"]').submit();
+                }''')
+            else:
+                # 点击登录按钮
+                await login_button.click()
+                print("登录按钮已点击，等待响应...")
+                
         else:
             # 备用选择器
             login_button = await page.querySelector('button[type="submit"]')
@@ -139,7 +147,7 @@ async def login(username, password, panel):
             # 等待最多20秒的导航
             await asyncio.wait_for(
                 page.waitForNavigation({'waitUntil': 'networkidle0', 'timeout': 20000}),
-                20
+                25
             )
             print("页面导航完成")
         except asyncio.TimeoutError:
