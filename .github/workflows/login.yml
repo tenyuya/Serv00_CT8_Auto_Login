@@ -21,12 +21,18 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 安装 Chrome 和 ChromeDriver
+      - name: 安装 Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: 安装依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y google-chrome-stable wget unzip gnupg libnss3 fonts-liberation xvfb curl
-          
-          # 安装 ChromeDriver 对应 Chrome 版本
+          sudo apt-get install -y wget unzip curl xvfb libnss3 fonts-liberation
+
+      - name: 安装 ChromeDriver
+        run: |
           CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d. -f1-3)
           DRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION")
           wget -q "https://chromedriver.storage.googleapis.com/$DRIVER_VERSION/chromedriver_linux64.zip"
