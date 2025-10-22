@@ -61,6 +61,7 @@ jobs:
     needs: login
     if: always()
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
     steps:
-      - name: Keepalive
-        run: echo "Workflow completed with status: ${{ needs.login.result }}"
+      - uses: liskin/gh-workflow-keepalive@v1
