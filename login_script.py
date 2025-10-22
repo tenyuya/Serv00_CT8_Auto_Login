@@ -1,292 +1,469 @@
-import json
-import asyncio
-from pyppeteer import launch
-from datetime import datetime, timedelta
-import aiofiles
-import random
-import requests
+import time
+import logging
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, ElementNotInteractableException, NoSuchElementException
+import datetime
 import os
 
-# 从环境变量中获取 Telegram Bot Token 和 Chat ID
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("serv00_login.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-def format_to_iso(date):
-    return date.strftime('%Y-%m-%d %H:%M:%S')
-
-async def delay_time(ms):
-    await asyncio.sleep(ms / 1000)
-
-# 全局浏览器实例
-browser = None
-message = ""
-
-async def login(username, password, panel):
-    global browser
-    page = None
-    serviceName = 'CT8' if 'ct8' in panel else 'Serv00'
-    
-    try:
-        if not browser:
-            browser = await launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--no-first-run',
-                    '--no-zygote',
-                    '--disable-gpu',
-                    '--window-size=1920,1080'
-                ]
+class Serv00AutoLogin:
+    def __init__(self):
+        self.driver = None
+        self.wait = None
+        
+    def setup_driver(self):
+        """设置浏览器驱动"""
+        options = webdriver.ChromeOptions()
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option('useAutomationExtension', False)
+        
+        # 如果需要无头模式，取消下面的注释
+        # options.add_argument('--headless')
+        
+        try:
+            self.driver = webdriver.Chrome(options=options)
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            self.wait = WebDriverWait(self.driver, 15)
+            logger.info("浏览器驱动设置完成")
+            return True
+        except Exception as e:
+            logger.error(f"浏览器驱动设置失败: {e}")
+            return False
+        
+    def wait_for_element_clickable(self, by, value, timeout=10):
+        """等待元素可点击"""
+        try:
+            return WebDriverWait(self.driver, timeout).until(
+                EC.element_to_be_clickable((by, value))
             )
-
-        page = await browser.newPage()
+        except TimeoutException:
+            logger.error(f"元素不可点击: {by}={value}")
+            return None
         
-        # 设置视口大小
-        await page.setViewport({'width': 1920, 'height': 1080})
+    def wait_for_element_visible(self, by, value, timeout=10):
+        """等待元素可见"""
+        try:
+            return WebDriverWait(self.driver, timeout).until(
+                EC.visibility_of_element_located((by, value))
+            )
+        except TimeoutException:
+            logger.error(f"元素不可见: {by}={value}")
+            return None
         
-        # 设置用户代理
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
-        
-        url = f'https://{panel}/login/?next=/'
-        print(f"正在访问: {url}")
-        await page.goto(url, {'waitUntil': 'networkidle2', 'timeout': 30000})
-
-        # 等待页面加载完成 - 根据图片中的结构等待表单
-        await page.waitForSelector('form[action="/login/"]', {'timeout': 10000})
-        print("表单加载完成")
-        
-        # 确保页面完全渲染
-        await asyncio.sleep(2)
-
-        # 根据图片中的结构，用户名输入框的选择器是 input[name="username"]
-        print("正在定位用户名输入框...")
-        username_input = await page.waitForSelector('input[name="username"]', {'timeout': 10000})
-        if username_input:
-            print("找到用户名输入框，开始输入...")
-            # 先滚动到元素可见
-            await page.evaluate('''(element) => {
-                element.scrollIntoView({behavior: 'smooth', block: 'center'});
-            }''', username_input)
-            
-            await asyncio.sleep(1)
-            
-            # 点击输入框确保焦点
-            await username_input.click()
-            await asyncio.sleep(0.5)
-            
-            # 清空输入框
-            await page.evaluate('(input) => input.value = ""', username_input)
-            await asyncio.sleep(0.5)
-            
-            # 输入用户名
-            await username_input.type(username, {'delay': 50})
-            print("用户名输入完成")
-        else:
-            raise Exception('无法找到用户名输入框')
-
-        # 密码输入框 - 根据图片中的结构
-        print("正在定位密码输入框...")
-        password_input = await page.waitForSelector('input[name="password"]', {'timeout': 10000})
-        if password_input:
-            print("找到密码输入框，开始输入...")
-            await password_input.click()
-            await asyncio.sleep(0.5)
-            await password_input.type(password, {'delay': 50})
-            print("密码输入完成")
-        else:
-            raise Exception('无法找到密码输入框')
-
-        # 根据图片中的结构，登录按钮是 button.button.button--primary
-        print("正在定位登录按钮...")
-        
-        # 使用正确的选择器 - 修正了选择器语法
-        login_button = await page.waitForSelector('button.button.button--primary', {
-            'timeout': 10000
-        })
-        
-        if login_button:
-            print("找到登录按钮，准备点击...")
-            
-            # 滚动到按钮可见
-            await page.evaluate('''(element) => {
-                element.scrollIntoView({behavior: 'smooth', block: 'center'});
-            }''', login_button)
-            
-            await asyncio.sleep(1)
-            
-            # 确保按钮可点击
-            is_enabled = await page.evaluate('''() => {
-                const btn = document.querySelector('button.button.button--primary');
-                return btn && !btn.disabled;
-            }''')
-            
-            if not is_enabled:
-                print("按钮不可点击，尝试其他方法...")
-                # 如果按钮不可点击，尝试通过表单提交
-                await page.evaluate('''() => {
-                    document.querySelector('form[action="/login/"]').submit();
-                }''')
-            else:
-                # 点击登录按钮
-                await login_button.click()
-                print("登录按钮已点击，等待响应...")
+    def safe_click(self, element):
+        """安全的点击方法"""
+        try:
+            # 方法1: 直接点击
+            element.click()
+            logger.info("直接点击成功")
+            return True
+        except ElementNotInteractableException:
+            try:
+                # 方法2: 使用JavaScript点击
+                self.driver.execute_script("arguments[0].click();", element)
+                logger.info("JavaScript点击成功")
+                return True
+            except Exception as e:
+                logger.error(f"JavaScript点击失败: {e}")
+                return False
+        except Exception as e:
+            logger.error(f"点击失败: {e}")
+            return False
                 
-        else:
-            # 备用选择器
-            login_button = await page.querySelector('button[type="submit"]')
-            if login_button:
-                await login_button.click()
+    def scroll_to_element(self, element):
+        """滚动到元素位置"""
+        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});", element)
+        time.sleep(0.5)
+        
+    def force_input(self, element, text):
+        """强制输入文本"""
+        try:
+            element.clear()
+            element.send_keys(text)
+        except:
+            self.driver.execute_script(f"arguments[0].value = '{text}';", element)
+            # 触发输入事件
+            self.driver.execute_script("""
+                var event = new Event('input', { bubbles: true });
+                arguments[0].dispatchEvent(event);
+            """, element)
+        
+    def check_for_overlays(self):
+        """检查是否有遮挡层"""
+        overlay_selectors = [
+            '.modal',
+            '.popup', 
+            '.overlay',
+            '[class*="modal"]',
+            '[class*="popup"]',
+            '[class*="overlay"]',
+            '.loading',
+            '.spinner'
+        ]
+        
+        for selector in overlay_selectors:
+            try:
+                overlays = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                for overlay in overlays:
+                    # 检查遮挡层是否可见
+                    if overlay.is_displayed():
+                        logger.warning(f"发现遮挡层: {selector}")
+                        # 尝试关闭遮挡层
+                        self.driver.execute_script("arguments[0].style.display = 'none';", overlay)
+            except:
+                continue
+                
+    def take_screenshot(self, filename):
+        """截取屏幕截图"""
+        try:
+            screenshot_dir = "screenshots"
+            if not os.path.exists(screenshot_dir):
+                os.makedirs(screenshot_dir)
+                
+            filepath = os.path.join(screenshot_dir, filename)
+            self.driver.save_screenshot(filepath)
+            logger.info(f"截图已保存: {filepath}")
+            return filepath
+        except Exception as e:
+            logger.error(f"截图失败: {e}")
+            return None
+            
+    def get_utc_time(self):
+        """获取UTC时间"""
+        return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        
+    def login_to_serv00(self, url, username, password, account_name):
+        """登录Serv00的主方法"""
+        logger.info(f"🌐 UTC时间: {self.get_utc_time()}")
+        logger.info(f"正在访问: {url}")
+        
+        try:
+            # 访问页面
+            self.driver.get(url)
+            
+            # 等待页面加载
+            time.sleep(3)
+            
+            # 检查并处理可能的遮挡层
+            self.check_for_overlays()
+            
+            # 定位用户名输入框
+            logger.info("正在定位用户名输入框...")
+            username_selectors = [
+                "input[name='login']",
+                "input[name='username']", 
+                "input[type='text']",
+                "input[placeholder*='login']",
+                "input[placeholder*='user']",
+                "#username",
+                "#login"
+            ]
+            
+            username_field = None
+            for selector in username_selectors:
+                try:
+                    username_field = self.wait_for_element_visible(By.CSS_SELECTOR, selector, 5)
+                    if username_field:
+                        logger.info(f"找到用户名输入框，使用选择器: {selector}")
+                        break
+                except:
+                    continue
+                    
+            if not username_field:
+                # 尝试通过XPath查找
+                xpath_selectors = [
+                    "//input[contains(@placeholder, 'Login')]",
+                    "//input[contains(@placeholder, 'login')]",
+                    "//input[contains(@placeholder, 'User')]",
+                    "//input[contains(@placeholder, 'user')]"
+                ]
+                
+                for xpath in xpath_selectors:
+                    try:
+                        username_field = self.wait_for_element_visible(By.XPATH, xpath, 3)
+                        if username_field:
+                            logger.info(f"找到用户名输入框，使用XPath: {xpath}")
+                            break
+                    except:
+                        continue
+                    
+            if not username_field:
+                error_msg = "未找到用户名输入框"
+                logger.error(error_msg)
+                self.take_screenshot(f"error_{account_name}_{int(time.time())}.png")
+                return False, error_msg
+                
+            # 输入用户名
+            logger.info("开始输入用户名...")
+            self.scroll_to_element(username_field)
+            self.force_input(username_field, username)
+            logger.info("用户名输入完成")
+            
+            # 定位密码输入框
+            logger.info("正在定位密码输入框...")
+            password_selectors = [
+                "input[name='password']",
+                "input[type='password']",
+                "input[placeholder*='password']",
+                "input[placeholder*='hasło']",
+                "#password",
+                "#pass"
+            ]
+            
+            password_field = None
+            for selector in password_selectors:
+                try:
+                    password_field = self.wait_for_element_visible(By.CSS_SELECTOR, selector, 5)
+                    if password_field:
+                        logger.info(f"找到密码输入框，使用选择器: {selector}")
+                        break
+                except:
+                    continue
+                    
+            if not password_field:
+                # 尝试通过XPath查找
+                xpath_selectors = [
+                    "//input[contains(@placeholder, 'Password')]",
+                    "//input[contains(@placeholder, 'password')]",
+                    "//input[contains(@placeholder, 'Hasło')]",
+                    "//input[contains(@placeholder, 'hasło')]"
+                ]
+                
+                for xpath in xpath_selectors:
+                    try:
+                        password_field = self.wait_for_element_visible(By.XPATH, xpath, 3)
+                        if password_field:
+                            logger.info(f"找到密码输入框，使用XPath: {xpath}")
+                            break
+                    except:
+                        continue
+                    
+            if not password_field:
+                error_msg = "未找到密码输入框"
+                logger.error(error_msg)
+                self.take_screenshot(f"error_{account_name}_{int(time.time())}.png")
+                return False, error_msg
+                
+            # 输入密码
+            logger.info("开始输入密码...")
+            self.scroll_to_element(password_field)
+            self.force_input(password_field, password)
+            logger.info("密码输入完成")
+            
+            # 等待一下让表单验证完成
+            time.sleep(1)
+            
+            # 定位登录按钮
+            logger.info("正在定位登录按钮...")
+            button_selectors = [
+                "button[type='submit']",
+                "input[type='submit']",
+                "button:contains('Zaloguj')",
+                "input[value*='Zaloguj']",
+                "button:contains('Login')",
+                "input[value*='Login']",
+                "button.btn",
+                "input.btn",
+                ".login-btn",
+                "#login-btn"
+            ]
+            
+            login_button = None
+            for selector in button_selectors:
+                try:
+                    if "contains" in selector:
+                        # 处理文本包含的选择器
+                        text = selector.split("contains('")[1].split("')")[0]
+                        xpath = f"//*[contains(text(), '{text}')]"
+                        login_button = self.wait_for_element_visible(By.XPATH, xpath, 3)
+                    else:
+                        login_button = self.wait_for_element_visible(By.CSS_SELECTOR, selector, 3)
+                    
+                    if login_button:
+                        logger.info(f"找到登录按钮，使用选择器: {selector}")
+                        break
+                except:
+                    continue
+                    
+            if not login_button:
+                # 尝试通过按钮文本查找
+                button_texts = ['Zaloguj się', 'Zaloguj', 'Login', 'Sign in']
+                for text in button_texts:
+                    try:
+                        xpath = f"//button[contains(text(), '{text}')]"
+                        login_button = self.wait_for_element_visible(By.XPATH, xpath, 3)
+                        if login_button:
+                            logger.info(f"找到登录按钮，使用文本: {text}")
+                            break
+                    except:
+                        continue
+                    
+            if not login_button:
+                error_msg = "未找到登录按钮"
+                logger.error(error_msg)
+                self.take_screenshot(f"error_{account_name}_{int(time.time())}.png")
+                return False, error_msg
+                
+            # 滚动到按钮位置
+            logger.info("滚动到登录按钮...")
+            self.scroll_to_element(login_button)
+            time.sleep(1)
+            
+            # 再次检查遮挡层
+            self.check_for_overlays()
+            
+            # 检查按钮状态
+            button_state = self.driver.execute_script("""
+                var elem = arguments[0];
+                return {
+                    display: window.getComputedStyle(elem).display,
+                    visibility: window.getComputedStyle(elem).visibility,
+                    opacity: window.getComputedStyle(elem).opacity,
+                    disabled: elem.disabled,
+                    readonly: elem.readOnly,
+                    visible: elem.offsetWidth > 0 && elem.offsetHeight > 0
+                }
+            """, login_button)
+            
+            logger.info(f"按钮状态: {button_state}")
+            
+            # 如果按钮被禁用，尝试启用它
+            if button_state.get('disabled', False):
+                self.driver.execute_script("arguments[0].disabled = false;", login_button)
+                logger.info("已启用被禁用的按钮")
+            
+            # 点击登录按钮
+            logger.info("准备点击登录按钮...")
+            if self.safe_click(login_button):
+                logger.info("登录按钮点击成功")
+                
+                # 等待登录结果
+                time.sleep(5)
+                
+                # 检查登录是否成功
+                current_url = self.driver.current_url
+                if "dashboard" in current_url.lower() or "panel" in current_url.lower() or "account" in current_url.lower():
+                    logger.info(f"{account_name} 登录成功!")
+                    self.take_screenshot(f"success_{account_name}_{int(time.time())}.png")
+                    return True, "登录成功"
+                else:
+                    # 检查是否有错误消息
+                    error_selectors = ['.error', '.alert-danger', '.text-danger', '[class*="error"]']
+                    error_msg = "未知错误"
+                    for selector in error_selectors:
+                        try:
+                            errors = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                            for error in errors:
+                                if error.is_displayed():
+                                    error_text = error.text.strip()
+                                    if error_text:
+                                        error_msg = error_text
+                                        logger.error(f"登录错误: {error_text}")
+                                        break
+                        except:
+                            continue
+                    
+                    self.take_screenshot(f"error_{account_name}_{int(time.time())}.png")
+                    return False, error_msg
             else:
-                raise Exception('无法找到登录按钮')
-
-        # 等待导航或页面变化
-        try:
-            # 等待最多20秒的导航
-            await asyncio.wait_for(
-                page.waitForNavigation({'waitUntil': 'networkidle0', 'timeout': 20000}),
-                25
-            )
-            print("页面导航完成")
-        except asyncio.TimeoutError:
-            print("导航超时，检查当前页面状态...")
-            # 检查是否已经登录成功
-            pass
-
-        # 检查登录是否成功 - 多种方式验证
-        is_logged_in = await page.evaluate('''() => {
-            // 检查登出链接
-            const logoutLink = document.querySelector('a[href*="/logout/"]');
-            // 检查用户相关元素
-            const userElements = document.querySelectorAll('[class*="user"], [class*="account"]');
-            // 检查错误消息
-            const errorMsg = document.querySelector('.error, .alert-danger, .login-error');
+                error_msg = "登录按钮点击失败"
+                logger.error(error_msg)
+                self.take_screenshot(f"error_{account_name}_{int(time.time())}.png")
+                return False, error_msg
+                
+        except Exception as e:
+            error_msg = f"登录过程中出现异常: {str(e)}"
+            logger.error(error_msg)
+            self.take_screenshot(f"error_{account_name}_{int(time.time())}.png")
+            return False, error_msg
             
-            console.log('登录状态检查:');
-            console.log('登出链接:', !!logoutLink);
-            console.log('用户元素:', userElements.length > 0);
-            console.log('错误消息:', !!errorMsg);
+    def process_accounts(self, accounts):
+        """处理所有账号"""
+        if not self.setup_driver():
+            logger.error("无法启动浏览器，程序退出")
+            return False
             
-            // 如果有登出链接或用户元素，并且没有错误消息，则认为登录成功
-            return (logoutLink || userElements.length > 0) && !errorMsg;
-        }''')
-
-        print(f"登录状态: {'成功' if is_logged_in else '失败'}")
-        return is_logged_in
-
-    except Exception as e:
-        print(f'{serviceName}账号 {username} 登录时出现错误: {e}')
-        # 保存截图用于调试
+        results = []
+        
         try:
-            if page:
-                screenshot_path = f'error_{username}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
-                await page.screenshot({'path': screenshot_path})
-                print(f'错误截图已保存: {screenshot_path}')
-        except Exception as screenshot_error:
-            print(f'保存截图时出错: {screenshot_error}')
-        return False
-
-    finally:
-        if page:
-            await page.close()
-
-async def shutdown_browser():
-    global browser
-    if browser:
-        await browser.close()
-        browser = None
-
-async def main():
-    global message
-
-    try:
-        async with aiofiles.open('accounts.json', mode='r', encoding='utf-8') as f:
-            accounts_json = await f.read()
-        accounts = json.loads(accounts_json)
-    except Exception as e:
-        print(f'读取 accounts.json 文件时出错: {e}')
-        return
-
-    # 添加报告头部
-    message += "📊 登录状态报告\n\n"
-    message += "━━━━━━━━━━━━━━━━━━━━\n"
-
-    successful_logins = 0
-    total_accounts = len(accounts)
-
-    for i, account in enumerate(accounts):
-        username = account['username']
-        password = account['password']
-        panel = account['panel']
-
-        serviceName = 'CT8' if 'ct8' in panel else 'Serv00'
-        print(f"\n正在处理第 {i+1}/{total_accounts} 个账号: {serviceName} - {username}")
+            for i, account in enumerate(accounts, 1):
+                logger.info(f"正在处理第 {i}/{len(accounts)} 个账号: {account['name']}")
+                
+                success, message = self.login_to_serv00(
+                    account['url'], 
+                    account['username'], 
+                    account['password'], 
+                    account['name']
+                )
+                
+                results.append({
+                    'account': account['name'],
+                    'success': success,
+                    'message': message
+                })
+                
+                if success:
+                    logger.info(f"{account['name']} 处理完成")
+                else:
+                    logger.error(f"{account['name']} 处理失败: {message}")
+                
+                # 如果不是最后一个账号，等待一段时间
+                if i < len(accounts):
+                    wait_time = 5
+                    logger.info(f"等待 {wait_time} 秒后处理下一个账号...")
+                    time.sleep(wait_time)
+                    
+            # 汇总结果
+            success_count = sum(1 for r in results if r['success'])
+            logger.info(f"所有账号登录完成！成功: {success_count}/{len(accounts)}")
+            
+            # 发送通知（这里可以集成Telegram等通知服务）
+            self.send_notification(results)
+            
+            return True
+                    
+        finally:
+            if self.driver:
+                self.driver.quit()
+                logger.info("浏览器已关闭")
+                
+    def send_notification(self, results):
+        """发送通知（需要自行实现）"""
+        # 这里可以集成Telegram、邮件等通知服务
+        success_count = sum(1 for r in results if r['success'])
+        total_count = len(results)
         
-        is_logged_in = await login(username, password, panel)
+        message = f"Serv00登录完成\n成功: {success_count}/{total_count}\n时间: {self.get_utc_time()}"
         
-        if is_logged_in:
-            successful_logins += 1
-
-        now_beijing = format_to_iso(datetime.utcnow() + timedelta(hours=8))
-        status_icon = "✅" if is_logged_in else "❌"
-        status_text = "登录成功" if is_logged_in else "登录失败"
-
-        message += (
-            f"🔹 服务商: {serviceName}\n"
-            f"👤 账号: {username}\n"
-            f"🕒 时间: {now_beijing}\n"
-            f"{status_icon} 状态: {status_text}\n"
-            "────────────────────\n"
-        )
-
-        # 如果不是最后一个账号，添加延迟
-        if i < len(accounts) - 1:
-            delay = random.randint(3000, 8000)
-            print(f"等待 {delay/1000} 秒后处理下一个账号...")
-            await delay_time(delay)
-
-    # 添加报告尾部
-    success_rate = (successful_logins / total_accounts) * 100
-    message += f"\n📈 统计信息:\n"
-    message += f"✅ 成功: {successful_logins}/{total_accounts}\n"
-    message += f"📊 成功率: {success_rate:.1f}%\n"
-    message += "🏁 所有账号操作已完成"
-
-    await send_telegram_message(message)
-    print('所有账号登录完成！')
-    await shutdown_browser()
-
-async def send_telegram_message(message):
-    formatted_message = f"""
-📨 Serv00 & CT8 保号脚本运行报告
-━━━━━━━━━━━━━━━━━━━━
-🕘 北京时间: {format_to_iso(datetime.utcnow() + timedelta(hours=8))}
-🌐 UTC时间: {format_to_iso(datetime.utcnow())}
-━━━━━━━━━━━━━━━━━━━━
-
-{message}
-"""
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        'chat_id': TELEGRAM_CHAT_ID,
-        'text': formatted_message,
-        'parse_mode': 'Markdown',
-    }
-    headers = {
-        'Content-Type': 'application/json'
-    }
-
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-        if response.status_code == 200:
-            print("Telegram消息发送成功")
-        else:
-            print(f"发送消息到Telegram失败: {response.status_code} - {response.text}")
-    except Exception as e:
-        print(f"发送消息到Telegram时出错: {e}")
-
-if __name__ == '__main__':
-    asyncio.run(main())
+        for result in results:
+            status = "✅" if result['success'] else "❌"
+            message += f"\n{status} {result['account']}: {result['message']}"
+        
+        logger.info(f"通知消息: {message}")
+        
+        # 示例：Telegram通知（需要安装python-telegram-bot）
+        # try:
+        #     import telegram
+        #     bot = telegram.Bot(token='YOUR_TELEGRAM_BOT_TOKEN')
+        #     bot.send_message(chat_id='YOUR_CHAT_ID', text=message)
+        #     logger.info("Telegram消息发送成功")
+        # except ImportError:
+        #     logger.warning("未安装python-telegram-bot库，无法发送Telegram通知")
+        # except Exception as e:
+        #     logger.error(f"Telegram通知发送
