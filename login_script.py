@@ -23,21 +23,16 @@ def format_to_iso(date):
 async def delay_time(ms):
     await asyncio.sleep(ms / 1000)
 
-# ------------------ 登录函数（带重试） ------------------
+# ------------------ 登录函数（带重试 & 可见判断） ------------------
 
 async def login(username, password, panel, max_retries=2):
     """
     登录 Serv00 / CT8 面板，失败自动重试
-    :param username: 用户名
-    :param password: 密码
-    :param panel: 面板地址
-    :param max_retries: 最大重试次数
-    :return: True 登录成功 / False 登录失败
     """
     global browser
     serviceName = 'CT8' if 'ct8' in panel.lower() else 'Serv00'
 
-    for attempt in range(1, max_retries + 2):  # 第一次 + 重试次数
+    for attempt in range(1, max_retries + 2):
         page = None
         try:
             if not browser:
@@ -54,13 +49,14 @@ async def login(username, password, panel, max_retries=2):
             url = f'https://{panel}/login/?next=/'
             await page.goto(url, {'waitUntil': 'networkidle2'})
 
-            # 等待用户名输入框
-            await page.waitForSelector('#id_username', timeout=10000)
-            await page.evaluate('(input) => input.value = ""', await page.querySelector('#id_username'))
+            # 等待用户名输入框可见
+            await page.waitForSelector('#id_username', {'visible': True, 'timeout': 10000})
+            username_input = await page.querySelector('#id_username')
+            await page.evaluate('(el) => el.value = ""', username_input)
             await page.type('#id_username', username)
             await page.type('#id_password', password)
 
-            # 等待并点击登录按钮（多选择器匹配）
+            # 等待登录按钮可见并滚动到视口
             button_selectors = [
                 '#submit',
                 'button[type="submit"]',
@@ -70,9 +66,10 @@ async def login(username, password, panel, max_retries=2):
             login_button = None
             for selector in button_selectors:
                 try:
-                    await page.waitForSelector(selector, timeout=5000)
+                    await page.waitForSelector(selector, {'visible': True, 'timeout': 5000})
                     login_button = await page.querySelector(selector)
                     if login_button:
+                        await page.evaluate('(el) => el.scrollIntoView()', login_button)
                         break
                 except:
                     continue
@@ -99,7 +96,7 @@ async def login(username, password, panel, max_retries=2):
             if attempt <= max_retries:
                 wait_sec = random.randint(1, 3)
                 print(f'等待 {wait_sec} 秒后重试...')
-                await delay_time(wait_sec * 1000)
+                await asyncio.sleep(wait_sec)
             else:
                 return False
 
