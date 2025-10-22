@@ -34,11 +34,10 @@ def send_telegram_message(message: str):
         logger.warning("⚠️ Telegram环境变量未设置，跳过通知")
         return False
 
-    formatted_message = f"""📨 Serv00 & CT8 保号脚本运行报告
-🕘 北京时间: {format_to_iso(datetime.utcnow() + timedelta(hours=8))}
-🌐 UTC时间: {format_to_iso(datetime.utcnow())}
+    formatted_message = f"""📨 Serv00 & CT8
 
-{message}"""
+{message}
+"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         'chat_id': TELEGRAM_CHAT_ID,
@@ -172,12 +171,13 @@ class Serv00LoginBot:
         password = account_info.get('password') or account_info.get('pass') or ''
 
         if not panel or not username or not password:
-            logger.error(f"❌ 账号信息不完整: {name}")
+            logger.error(f"❌ 账号信息不完整: {name} (panel、username、password 三项必需)")
             return False, "账号信息不完整"
 
         logger.info(f"🔐 开始处理账号: {name} (用户名: {username})")
 
         url_candidates = self.build_candidate_urls(panel)
+        logger.debug(f"候选登录页: {url_candidates}")
 
         for url in url_candidates:
             try:
@@ -194,8 +194,12 @@ class Serv00LoginBot:
                                  self.wait_for_element(By.CSS_SELECTOR, "input[type='text']", timeout=4) or \
                                  self.wait_for_element(By.ID, "username", timeout=4)
                 if not username_field:
+                    logger.debug(f"在 {url} 未找到用户名输入框，尝试下一个候选页")
                     continue
-                self.safe_send_keys(username_field, username)
+                if not self.safe_send_keys(username_field, username):
+                    self.take_screenshot(f"error_username_input_{name}")
+                    return False, "用户名输入失败"
+                logger.info("✅ 用户名输入完成")
                 time.sleep(0.5)
 
                 password_field = self.wait_for_element(By.NAME, "password", timeout=4) or \
@@ -204,34 +208,47 @@ class Serv00LoginBot:
                 if not password_field:
                     self.take_screenshot(f"error_password_not_found_{name}")
                     return False, "未找到密码输入框"
-                self.safe_send_keys(password_field, password)
+                if not self.safe_send_keys(password_field, password):
+                    self.take_screenshot(f"error_password_input_{name}")
+                    return False, "密码输入失败"
+                logger.info("✅ 密码输入完成")
                 time.sleep(0.5)
 
                 login_button = self.wait_for_element_clickable(By.CSS_SELECTOR, "button[type='submit']", timeout=4) or \
                                self.wait_for_element_clickable(By.CSS_SELECTOR, "button.btn-primary", timeout=4)
-                if login_button:
-                    self.safe_click(login_button)
+                if not login_button:
+                    logger.debug("未找到登录按钮，尝试回车提交")
+                    try:
+                        password_field.send_keys("\n")
+                    except Exception:
+                        logger.debug("回车提交失败")
                 else:
-                    password_field.send_keys("\n")
+                    logger.info("🖱️ 点击登录按钮...")
+                    if not self.safe_click(login_button):
+                        self.take_screenshot(f"error_click_failed_{name}")
+                        return False, "登录按钮点击失败"
 
                 time.sleep(5)
                 current_url = self.driver.current_url or ''
                 page_title = (self.driver.title or '').lower()
                 page_source = (self.driver.page_source or '').lower()
 
-                success_indicators = ['dashboard', 'panel', 'account', 'welcome', 'logged', 'profile']
-                error_indicators = ['error', 'invalid', 'failed', 'unauthorized', 'forbidden']
+                success_indicators = ['dashboard', 'panel', 'account', 'welcome', 'strona główna', 'logged', 'profile']
+                error_indicators = ['error', 'błąd', 'invalid', 'failed', 'unauthorized', 'forbidden']
 
-                if any(ind in current_url.lower() for ind in success_indicators) or \
-                   any(ind in page_title for ind in success_indicators) or \
-                   any(ind in page_source for ind in success_indicators):
+                if any(ind in current_url.lower() for ind in success_indicators) \
+                   or any(ind in page_title for ind in success_indicators) \
+                   or any(ind in page_source for ind in success_indicators):
+                    logger.info(f"✅ {name} 登录成功! (URL: {current_url})")
                     self.take_screenshot(f"success_{name}")
                     return True, "登录成功"
 
                 if any(ind in page_source for ind in error_indicators):
+                    logger.error(f"❌ {name} 登录失败: 页面包含错误信息")
                     self.take_screenshot(f"error_page_{name}")
                     return False, "页面错误信息"
 
+                logger.info(f"⚠️ {name} 登录状态未知，但在 {url} 已尝试提交，当前 URL: {current_url}")
                 self.take_screenshot(f"unknown_{name}")
                 return True, "页面跳转完成"
 
@@ -239,11 +256,13 @@ class Serv00LoginBot:
                 logger.error(f"❌ 在尝试 {url} 登录时出现异常: {e}")
                 continue
 
+        logger.error(f"❌ 所有候选登录页都尝试失败: {panel}")
         self.take_screenshot(f"error_all_candidates_{name}")
         return False, "无法找到合适的登录页面或登录失败"
 
     def process_all_accounts(self):
         accounts_json = os.environ.get('ACCOUNTS_JSON', '[]')
+        logger.info("📦 读取 ACCOUNTS_JSON（已屏蔽密码）")
         try:
             accounts = json.loads(accounts_json)
         except json.JSONDecodeError as e:
@@ -253,6 +272,9 @@ class Serv00LoginBot:
             logger.error("❌ 未找到账号配置")
             return False
 
+        usernames = [a.get('username') or a.get('user') or '' for a in accounts]
+        logger.info(f"📋 找到 {len(accounts)} 个账号需要处理, 用户名列表: {usernames}")
+
         if not self.setup_driver():
             return False
 
@@ -261,32 +283,41 @@ class Serv00LoginBot:
         try:
             for i, account in enumerate(accounts, 1):
                 short_name = account.get('name') or account.get('username') or account.get('panel') or f'账号{i}'
+                logger.info(f"🔄 处理第 {i}/{len(accounts)} 个账号: {short_name}")
+
                 success, message = self.login_to_serv00(account)
                 results.append({
                     'name': short_name,
                     'success': success,
-                    'message': message
+                    'message': message,
+                    'panel': account.get('panel', '')
                 })
+
                 if i < len(accounts):
                     wait_time = random.randint(3, 8)
+                    logger.info(f"⏳ 等待 {wait_time} 秒后处理下一个账号...")
                     time.sleep(wait_time)
 
             # 构造 Telegram 消息
             message_lines = []
             success_count = sum(1 for r in results if r['success'])
             for r in results:
+                panel_lower = r['panel'].lower()
+                service_provider = 'CT8' if panel_lower == 'panel.ct8.pl' else 'Serv00'
                 status_icon = "✅" if r['success'] else "❌"
                 message_lines.append(
-                    f"🔹 服务商: Serv00\n👤 账号: {r['name']}\n🕒 时间: {format_to_iso(datetime.utcnow() + timedelta(hours=8))}\n{status_icon} 状态: {r['message']}\n"
+                    f"🖥️ 服务商: {service_provider}\n👤 用户名: {r['name']}\n⏰ 时间: {format_to_iso(datetime.utcnow() + timedelta(hours=8))}\n{status_icon} 状态: {r['message']}\n"
                 )
             success_rate = (success_count / len(results)) * 100
-            message_lines.append(f"📈 统计信息:\n✅ 成功: {success_count}/{len(results)}\n📊 成功率: {success_rate:.1f}%\n🏁 所有账号操作已完成")
+            message_lines.append(
+                f"📊 统计信息:\n✅ 成功: {success_count}/{len(results)}\n📈 成功率: {success_rate:.1f}%\n🏁 所有账号操作已完成"
+            )
             send_telegram_message("\n".join(message_lines))
 
             return success_count > 0
         except Exception as e:
             logger.error(f"❌ 处理过程中出现异常: {e}")
-            send_telegram_message(f"❌ Serv00 登录任务失败\n\n错误: {e}")
+            send_telegram_message(f"❌ Serv00 & CT8 登录任务失败\n\n错误: {e}")
             return False
         finally:
             if self.driver:
@@ -294,11 +325,12 @@ class Serv00LoginBot:
                     self.driver.quit()
                 except Exception:
                     pass
+                logger.info("🚪 浏览器已关闭")
 
 
 # -------------------- 主函数 --------------------
 def main():
-    logger.info("🚀 开始执行 Serv00 自动登录脚本")
+    logger.info("🚀 开始执行 Serv00 & CT8 自动登录脚本")
     bot = Serv00LoginBot()
     success = bot.process_all_accounts()
     if success:
