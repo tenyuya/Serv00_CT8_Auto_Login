@@ -1,4 +1,4 @@
-name: Run Login Script
+name: Serv00 自动登录
 
 on:
   workflow_dispatch:
@@ -29,29 +29,16 @@ jobs:
       - name: 安装依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget unzip curl xvfb libnss3 fonts-liberation
-
-      - name: 安装 ChromeDriver
-        run: |
-          CHROME_VERSION=$(google-chrome --version | awk '{print $3}' | cut -d. -f1-3)
-          DRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION")
-          wget -q "https://chromedriver.storage.googleapis.com/$DRIVER_VERSION/chromedriver_linux64.zip"
-          sudo unzip -o chromedriver_linux64.zip -d /usr/local/bin/
-          sudo chmod +x /usr/local/bin/chromedriver
-          rm chromedriver_linux64.zip
-
-      - name: 安装 Python 依赖
-        run: |
+          sudo apt-get install -y curl unzip xvfb libnss3 fonts-liberation
           python -m pip install --upgrade pip
-          pip install selenium requests
+          pip install selenium requests webdriver-manager chromedriver-binary-auto
 
       - name: 运行登录脚本
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
-        run: |
-          python login_script.py
+        run: python login_script.py
 
       - name: 上传截图
         uses: actions/upload-artifact@v4
